@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZonePlayer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #000;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Segoe UI', sans-serif;
+  user-select: none;
+}
+
+/* ─── Drop Screen ─── */
+#drop-screen {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: #0a0a0a;
+  color: #888;
+  z-index: 100;
+  transition: background .2s;
+}
+#drop-screen.drag-over { background: #111; color: #fff; }
+#drop-screen.hidden { display: none; }
+.drop-icon { font-size: 72px; margin-bottom: 20px; opacity: .5; }
+.drop-title { font-size: 24px; margin-bottom: 8px; }
+.drop-sub { font-size: 14px; opacity: .6; margin-bottom: 24px; }
+#file-btn {
+  padding: 10px 28px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: transparent;
+  color: #aaa;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+#file-btn:hover { border-color: #888; color: #fff; }
+#file-input { display: none; }
+
+/* ─── Player ─── */
+#player-wrap {
+  position: fixed; inset: 0;
+  display: none;
+  flex-direction: column;
+}
+#player-wrap.active { display: flex; }
+
+video {
+  flex: 1;
+  width: 100%;
+  background: #000;
+  object-fit: contain;
+  display: block;
+}
+
+/* ─── Zone Overlay ─── */
+#zone-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  bottom: 4px; /* above progress bar */
+  display: flex;
+  cursor: pointer;
+}
+
+.zone {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+  position: relative;
+  overflow: hidden;
+}
+
+/* widths: 15 / 20 / 30 / 20 / 15 */
+.zone:nth-child(1) { flex: 15; }
+.zone:nth-child(2) { flex: 20; }
+.zone:nth-child(3) { flex: 30; }
+.zone:nth-child(4) { flex: 20; }
+.zone:nth-child(5) { flex: 15; }
+
+.zone:hover { background: rgba(255,255,255,.06); }
+
+.zone-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+.zone:hover .zone-label { opacity: 1; }
+
+.zone-icon {
+  font-size: 36px;
+  filter: drop-shadow(0 0 8px rgba(255,255,255,.5));
+}
+.zone-text {
+  font-size: 12px;
+  color: #ccc;
+  letter-spacing: .05em;
+}
+
+/* Divider lines between zones (subtle) */
+.zone + .zone::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 20%; bottom: 20%;
+  width: 1px;
+  background: rgba(255,255,255,.08);
+}
+
+/* ─── Flash Feedback ─── */
+.flash {
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,.18);
+  border-radius: 4px;
+  animation: flash-fade .35s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes flash-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.feedback-icon {
+  position: absolute;
+  font-size: 56px;
+  animation: feedback-pop .5s ease-out forwards;
+  pointer-events: none;
+  filter: drop-shadow(0 0 12px rgba(255,255,255,.8));
+}
+@keyframes feedback-pop {
+  0%   { transform: scale(.6); opacity: 1; }
+  60%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+/* ─── Progress Bar ─── */
+#progress-wrap {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: rgba(255,255,255,.08);
+  cursor: pointer;
+  transition: height .15s, background .15s;
+  z-index: 10;
+}
+#progress-wrap:hover {
+  height: 20px;
+  background: rgba(255,255,255,.15);
+}
+#progress-bar {
+  height: 100%;
+  background: #e33;
+  width: 0%;
+  pointer-events: none;
+  transition: width .1s linear;
+}
+#progress-thumb {
+  position: absolute;
+  top: 50%; right: -5px;
+  transform: translateY(-50%);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #e33;
+  opacity: 0;
+  transition: opacity .15s;
+}
+#progress-wrap:hover #progress-thumb { opacity: 1; }
+
+/* ─── HUD (top bar) ─── */
+#hud {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,.6), transparent);
+  opacity: 0;
+  transition: opacity .3s;
+  z-index: 20;
+}
+#player-wrap:hover #hud { opacity: 1; }
+
+#filename-label {
+  font-size: 13px;
+  color: #ccc;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-btns { display: flex; gap: 10px; }
+
+.hud-btn {
+  background: rgba(255,255,255,.12);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  width: 34px; height: 34px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.hud-btn:hover { background: rgba(255,255,255,.25); }
+
+/* ─── Volume Toast ─── */
+#vol-toast {
+  position: absolute;
+  top: 54px; right: 14px;
+  background: rgba(0,0,0,.75);
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+  z-index: 30;
+}
+#vol-toast.show { opacity: 1; }
+
+/* ─── Time Toast ─── */
+#time-toast {
+  position: absolute;
+  bottom: 18px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.75);
+  color: #fff;
+  font-size: 15px;
+  padding: 5px 16px;
+  border-radius: 20px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+  z-index: 30;
+  white-space: nowrap;
+}
+#time-toast.show { opacity: 1; }
+
+/* ─── Manual Modal ─── */
+#modal-bg {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.7);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+#modal-bg.open { display: flex; }
+#modal {
+  background: #1a1a1a;
+  color: #ddd;
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 560px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  line-height: 1.7;
+  border: 1px solid #333;
+}
+#modal h2 { font-size: 18px; margin-bottom: 16px; color: #fff; }
+#modal h3 { font-size: 14px; color: #aaa; margin: 14px 0 6px; letter-spacing: .05em; }
+#modal p, #modal li { font-size: 13px; }
+#modal ul { padding-left: 20px; }
+#modal table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+#modal th, #modal td { padding: 5px 10px; text-align: left; border-bottom: 1px solid #2a2a2a; }
+#modal th { color: #888; font-weight: normal; }
+#modal-close {
+  margin-top: 20px;
+  display: block;
+  width: 100%;
+  padding: 8px;
+  background: #333;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+#modal-close:hover { background: #444; }
+</style>
+</head>
+<body>
+
+<!-- ── Drop Screen ── -->
+<div id="drop-screen">
+  <div class="drop-icon">🎬</div>
+  <div class="drop-title">動画をドロップ</div>
+  <div class="drop-sub">または下のボタンでファイルを選択</div>
+  <button id="file-btn">📂 ファイルを選ぶ</button>
+  <input type="file" id="file-input" accept="video/*">
+</div>
+
+<!-- ── Player ── -->
+<div id="player-wrap">
+  <video id="vid" preload="metadata"></video>
+
+  <!-- Zone Overlay -->
+  <div id="zone-overlay">
+    <div class="zone" data-action="seek" data-sec="-30">
+      <div class="zone-label">
+        <span class="zone-icon">⏮</span>
+        <span class="zone-text">-30秒</span>
+      </div>
+    </div>
+    <div class="zone" data-action="seek" data-sec="-5">
+      <div class="zone-label">
+        <span class="zone-icon">⏪</span>
+        <span class="zone-text">-5秒</span>
+      </div>
+    </div>
+    <div class="zone" data-action="toggle">
+      <div class="zone-label">
+        <span class="zone-icon" id="center-icon">⏸</span>
+        <span class="zone-text" id="center-text">停止</span>
+      </div>
+    </div>
+    <div class="zone" data-action="seek" data-sec="5">
+      <div class="zone-label">
+        <span class="zone-icon">⏩</span>
+        <span class="zone-text">+5秒</span>
+      </div>
+    </div>
+    <div class="zone" data-action="seek" data-sec="30">
+      <div class="zone-label">
+        <span class="zone-icon">⏭</span>
+        <span class="zone-text">+30秒</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <span id="filename-label">—</span>
+    <div class="hud-btns">
+      <button class="hud-btn" id="open-btn" title="別の動画を開く">📂</button>
+      <button class="hud-btn" id="fs-btn" title="フルスクリーン">⛶</button>
+      <button class="hud-btn" id="manual-btn" title="使い方">❓</button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div id="progress-wrap">
+    <div id="progress-bar">
+      <div id="progress-thumb"></div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="vol-toast">🔊 100%</div>
+  <div id="time-toast">0:00 / 0:00</div>
+</div>
+
+<!-- ── Manual Modal ── -->
+<div id="modal-bg">
+  <div id="modal">
+    <h2>📖 ZonePlayer 使い方</h2>
+
+    <h3>🎯 なにするアプリ？</h3>
+    <p>動画全体をクリックゾーンに分割。コントロールパネルを探さず、画面をそのままクリックするだけで操作できる動画プレーヤー。</p>
+
+    <h3>🚀 起動方法</h3>
+    <p><code>start_video_player.bat</code> をダブルクリック、またはこのHTMLファイルをブラウザで直接開く。</p>
+
+    <h3>📂 ファイルの読み込み</h3>
+    <ul>
+      <li>動画ファイルを画面にドラッグ＆ドロップ</li>
+      <li>「ファイルを選ぶ」ボタンでダイアログから選択</li>
+      <li>再生中でも右上📂ボタンで別の動画に切り替え可</li>
+    </ul>
+
+    <h3>👣 クリックゾーン操作</h3>
+    <table>
+      <tr><th>ゾーン</th><th>操作</th></tr>
+      <tr><td>左端（15%）</td><td>⏮ 30秒戻る</td></tr>
+      <tr><td>左（20%）</td><td>⏪ 5秒戻る</td></tr>
+      <tr><td>中央（30%）</td><td>⏯ 再生 / 停止</td></tr>
+      <tr><td>右（20%）</td><td>⏩ 5秒進む</td></tr>
+      <tr><td>右端（15%）</td><td>⏭ 30秒進む</td></tr>
+    </table>
+
+    <h3>🛠 その他の操作</h3>
+    <table>
+      <tr><th>操作</th><th>動作</th></tr>
+      <tr><td>マウスホイール</td><td>音量 ±5%</td></tr>
+      <tr><td>下部バーをクリック</td><td>その位置にシーク</td></tr>
+      <tr><td>Space / K</td><td>再生 / 停止</td></tr>
+      <tr><td>← →</td><td>5秒戻る / 進む</td></tr>
+      <tr><td>J / L</td><td>10秒戻る / 進む</td></tr>
+      <tr><td>F</td><td>フルスクリーン切り替え</td></tr>
+      <tr><td>M</td><td>ミュート切り替え</td></tr>
+    </table>
+
+    <h3>🔧 トラブル</h3>
+    <ul>
+      <li>動画が再生されない → ブラウザがそのコーデックに対応しているか確認（Chrome推奨）</li>
+      <li>音が出ない → ホイールで音量確認、Mキーでミュート解除</li>
+    </ul>
+
+    <h3>💡 豆ちしき</h3>
+    <p>このプレーヤーはサーバー不要の純HTMLファイル。ブラウザで直接開けばどこでも動く。</p>
+
+    <button id="modal-close">閉じる</button>
+  </div>
+</div>
+
+<script>
+const vid = document.getElementById('vid');
+const dropScreen = document.getElementById('drop-screen');
+const playerWrap = document.getElementById('player-wrap');
+const progressWrap = document.getElementById('progress-wrap');
+const progressBar = document.getElementById('progress-bar');
+const progressThumb = document.getElementById('progress-thumb');
+const volToast = document.getElementById('vol-toast');
+const timeToast = document.getElementById('time-toast');
+const centerIcon = document.getElementById('center-icon');
+const centerText = document.getElementById('center-text');
+const fileInput = document.getElementById('file-input');
+const filenameLabel = document.getElementById('filename-label');
+
+let volTimer, timeTimer;
+
+// ── File Loading ──
+function loadFile(file) {
+  if (!file || !file.type.startsWith('video/')) {
+    try { alert('動画ファイルを選んでね！'); } catch(e) {}
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  vid.src = url;
+  filenameLabel.textContent = file.name;
+  dropScreen.classList.add('hidden');
+  playerWrap.classList.add('active');
+  vid.play().catch(() => {});
+}
+
+document.getElementById('file-btn').addEventListener('click', () => fileInput.click());
+document.getElementById('open-btn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+// ── Drag & Drop ──
+['dragenter','dragover'].forEach(ev =>
+  dropScreen.addEventListener(ev, e => { e.preventDefault(); dropScreen.classList.add('drag-over'); })
+);
+['dragleave','drop'].forEach(ev =>
+  dropScreen.addEventListener(ev, e => { e.preventDefault(); dropScreen.classList.remove('drag-over'); })
+);
+dropScreen.addEventListener('drop', e => {
+  const file = e.dataTransfer.files[0];
+  loadFile(file);
+});
+
+// Allow dropping onto player too
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  loadFile(e.dataTransfer.files[0]);
+});
+
+// ── Play/Pause State ──
+function updateCenterZone() {
+  if (vid.paused) {
+    centerIcon.textContent = '▶️';
+    centerText.textContent = '再生';
+  } else {
+    centerIcon.textContent = '⏸';
+    centerText.textContent = '停止';
+  }
+}
+vid.addEventListener('play', updateCenterZone);
+vid.addEventListener('pause', updateCenterZone);
+
+// ── Zone Clicks ──
+function showFeedback(zone, icon) {
+  const flash = document.createElement('div');
+  flash.className = 'flash';
+  zone.appendChild(flash);
+  flash.addEventListener('animationend', () => flash.remove());
+
+  const fb = document.createElement('div');
+  fb.className = 'feedback-icon';
+  fb.textContent = icon;
+  zone.appendChild(fb);
+  fb.addEventListener('animationend', () => fb.remove());
+
+  showTimeToast();
+}
+
+function showTimeToast() {
+  clearTimeout(timeTimer);
+  const cur = formatTime(vid.currentTime);
+  const dur = formatTime(vid.duration || 0);
+  timeToast.textContent = `${cur} / ${dur}`;
+  timeToast.classList.add('show');
+  timeTimer = setTimeout(() => timeToast.classList.remove('show'), 1200);
+}
+
+document.querySelectorAll('.zone').forEach(zone => {
+  zone.addEventListener('click', e => {
+    e.stopPropagation();
+    const action = zone.dataset.action;
+    if (action === 'toggle') {
+      if (vid.paused) {
+        vid.play().catch(() => {});
+        showFeedback(zone, '▶️');
+      } else {
+        vid.pause();
+        showFeedback(zone, '⏸');
+      }
+    } else if (action === 'seek') {
+      const sec = parseFloat(zone.dataset.sec);
+      vid.currentTime = Math.max(0, Math.min(vid.duration || 0, vid.currentTime + sec));
+      const icon = sec < 0 ? (sec <= -20 ? '⏮' : '⏪') : (sec >= 20 ? '⏭' : '⏩');
+      showFeedback(zone, icon);
+    }
+  });
+});
+
+// ── Progress Bar ──
+vid.addEventListener('timeupdate', () => {
+  if (!vid.duration) return;
+  const pct = (vid.currentTime / vid.duration) * 100;
+  progressBar.style.width = pct + '%';
+  progressThumb.style.right = '-5px';
+});
+
+progressWrap.addEventListener('click', e => {
+  if (!vid.duration) return;
+  const rect = progressWrap.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  vid.currentTime = pct * vid.duration;
+  showTimeToast();
+});
+
+// ── Volume (scroll) ──
+document.addEventListener('wheel', e => {
+  if (!playerWrap.classList.contains('active')) return;
+  e.preventDefault();
+  const delta = e.deltaY < 0 ? 0.05 : -0.05;
+  vid.volume = Math.max(0, Math.min(1, vid.volume + delta));
+
+  clearTimeout(volTimer);
+  const pct = Math.round(vid.volume * 100);
+  const icon = vid.volume === 0 ? '🔇' : vid.volume < 0.4 ? '🔈' : '🔊';
+  volToast.textContent = `${icon} ${pct}%`;
+  volToast.classList.add('show');
+  volTimer = setTimeout(() => volToast.classList.remove('show'), 1000);
+}, { passive: false });
+
+// ── Keyboard ──
+document.addEventListener('keydown', e => {
+  if (!playerWrap.classList.contains('active')) return;
+  if (e.target.tagName === 'INPUT') return;
+  switch(e.key) {
+    case ' ': case 'k': case 'K':
+      e.preventDefault();
+      vid.paused ? vid.play() : vid.pause();
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      vid.currentTime = Math.max(0, vid.currentTime - 5);
+      showTimeToast();
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 5);
+      showTimeToast();
+      break;
+    case 'j': case 'J':
+      vid.currentTime = Math.max(0, vid.currentTime - 10);
+      showTimeToast();
+      break;
+    case 'l': case 'L':
+      vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 10);
+      showTimeToast();
+      break;
+    case 'f': case 'F':
+      toggleFullscreen();
+      break;
+    case 'm': case 'M':
+      vid.muted = !vid.muted;
+      break;
+  }
+});
+
+// ── Fullscreen ──
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+document.getElementById('fs-btn').addEventListener('click', toggleFullscreen);
+
+// ── Manual Modal ──
+document.getElementById('manual-btn').addEventListener('click', () => {
+  document.getElementById('modal-bg').classList.add('open');
+});
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-bg').classList.remove('open');
+});
+document.getElementById('modal-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-bg'))
+    document.getElementById('modal-bg').classList.remove('open');
+});
+
+// ── Util ──
+function formatTime(s) {
+  if (!isFinite(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+</script>
+</body>
+</html>
