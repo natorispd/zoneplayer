@@ -53,18 +53,49 @@ body {
 #player-wrap.active { display: flex; }
 
 video {
-  flex: 1;
-  width: 100%;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 100%;
+  width: auto;
   background: #000;
-  object-fit: contain;
   display: block;
+  max-width: none;
 }
 
-/* ─── Zone Overlay ─── */
-#zone-overlay {
+/* ─── Panic Zone (上1/3) ─── */
+#panic-zone {
   position: absolute;
   top: 0; left: 0; right: 0;
-  bottom: 4px; /* above progress bar */
+  height: 33.33vh;
+  z-index: 15;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#panic-zone:hover {
+  background: linear-gradient(to bottom, rgba(200,30,30,.18) 0%, transparent 100%);
+}
+#panic-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+#panic-zone:hover #panic-label { opacity: 1; }
+.panic-icon { font-size: 42px; filter: drop-shadow(0 0 10px rgba(255,80,80,.7)); }
+.panic-text { font-size: 13px; color: #ff8080; letter-spacing: .05em; }
+
+/* ─── Zone Overlay (中1/3のみ) ─── */
+#zone-overlay {
+  position: absolute;
+  top: 33.33vh; left: 0; right: 0;
+  bottom: 33.33vh;
   display: flex;
   cursor: pointer;
 }
@@ -145,37 +176,87 @@ video {
 }
 
 /* ─── Progress Bar ─── */
+/* ─── Progress Bar ─── */
 #progress-wrap {
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  height: 3px;
-  background: rgba(255,255,255,.08);
+  height: 6px;
   cursor: pointer;
-  transition: height .15s, background .15s;
+  transition: height .2s ease, background .2s, padding-bottom .2s;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-bottom: 0;
+  overflow: visible;
 }
-#progress-wrap:hover {
-  height: 20px;
-  background: rgba(255,255,255,.15);
+#progress-wrap.expanded {
+  height: 50vh;
+  background: linear-gradient(to top, rgba(0,0,0,.75) 0%, rgba(0,0,0,.1) 60%, transparent 100%);
+  padding-bottom: 20px;
 }
+
+#progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,.18);
+  border-radius: 3px;
+  position: relative;
+  pointer-events: none;
+  transition: height .2s ease;
+  flex-shrink: 0;
+}
+#progress-wrap.expanded #progress-track {
+  height: 10px;
+  background: rgba(255,255,255,.25);
+  border-radius: 5px;
+}
+
 #progress-bar {
   height: 100%;
   background: #e33;
   width: 0%;
   pointer-events: none;
   transition: width .1s linear;
+  border-radius: inherit;
+  position: relative;
 }
+
 #progress-thumb {
   position: absolute;
-  top: 50%; right: -5px;
+  top: 50%; right: -7px;
   transform: translateY(-50%);
-  width: 10px; height: 10px;
+  width: 14px; height: 14px;
   border-radius: 50%;
   background: #e33;
   opacity: 0;
-  transition: opacity .15s;
+  transition: opacity .15s, width .15s, height .15s, right .15s;
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba(0,0,0,.6);
 }
-#progress-wrap:hover #progress-thumb { opacity: 1; }
+#progress-wrap.expanded #progress-thumb {
+  opacity: 1;
+  width: 26px; height: 26px;
+  right: -13px;
+}
+
+/* ホバー中の時刻プレビュー */
+#hover-time {
+  position: absolute;
+  bottom: 48px;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.85);
+  color: #fff;
+  font-size: 14px;
+  padding: 5px 14px;
+  border-radius: 12px;
+  pointer-events: none;
+  opacity: 0;
+  white-space: nowrap;
+  transition: opacity .1s;
+  z-index: 20;
+}
+#progress-wrap.expanded #hover-time { opacity: 1; }
 
 /* ─── HUD (top bar) ─── */
 #hud {
@@ -309,6 +390,14 @@ video {
 <div id="player-wrap">
   <video id="vid" preload="metadata"></video>
 
+  <!-- Panic Zone -->
+  <div id="panic-zone">
+    <div id="panic-label">
+      <span class="panic-icon">⏏</span>
+      <span class="panic-text">初期画面に戻る</span>
+    </div>
+  </div>
+
   <!-- Zone Overlay -->
   <div id="zone-overlay">
     <div class="zone" data-action="seek" data-sec="-30">
@@ -355,9 +444,12 @@ video {
 
   <!-- Progress -->
   <div id="progress-wrap">
-    <div id="progress-bar">
-      <div id="progress-thumb"></div>
+    <div id="progress-track">
+      <div id="progress-bar">
+        <div id="progress-thumb"></div>
+      </div>
     </div>
+    <div id="hover-time"></div>
   </div>
 
   <!-- Toasts -->
@@ -432,6 +524,7 @@ const centerText = document.getElementById('center-text');
 const fileInput = document.getElementById('file-input');
 const filenameLabel = document.getElementById('filename-label');
 
+const hoverTime = document.getElementById('hover-time');
 let volTimer, timeTimer;
 
 // ── File Loading ──
@@ -544,6 +637,35 @@ progressWrap.addEventListener('click', e => {
   const pct = (e.clientX - rect.left) / rect.width;
   vid.currentTime = pct * vid.duration;
   showTimeToast();
+});
+
+// ─── パニックボタン：クリックで初期画面に戻る ───
+document.getElementById('panic-zone').addEventListener('click', () => {
+  vid.pause();
+  const oldSrc = vid.src;
+  vid.src = '';
+  try { if (oldSrc) URL.revokeObjectURL(oldSrc); } catch(e) {}
+  playerWrap.classList.remove('active');
+  dropScreen.classList.remove('hidden');
+});
+
+// ─── タイムライン展開：画面下1/3でホバー発動 ───
+document.addEventListener('mousemove', e => {
+  if (!playerWrap.classList.contains('active')) return;
+  if (e.clientY > window.innerHeight * 2 / 3) {
+    progressWrap.classList.add('expanded');
+    if (vid.duration) {
+      const rect = progressWrap.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      hoverTime.style.left = (e.clientX - rect.left) + 'px';
+      hoverTime.textContent = formatTime(pct * vid.duration);
+    }
+  } else {
+    progressWrap.classList.remove('expanded');
+  }
+});
+document.addEventListener('mouseleave', () => {
+  progressWrap.classList.remove('expanded');
 });
 
 // ── Volume (scroll) ──
